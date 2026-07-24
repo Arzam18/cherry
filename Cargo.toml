@@ -28,3 +28,6 @@ members = ["cherry-core"]
 debug=true
 lto="fat"
 codegen-units = 1
+
+[patch.crates-io]
+pyrrhic-rs = { git = "https://github.com/Algorhythm-sxv/pyrrhic-rs" }
