@@ -54,7 +54,6 @@ jobs:
             --config 'target.aarch64-linux-android.rustflags=[]'
 
           mkdir -p dist/bin
-          # Checks for lowercase 'cherry' or capitalized 'Cherry' binary output
           if [ -f "target/aarch64-linux-android/release/cherry" ]; then
             cp target/aarch64-linux-android/release/cherry dist/bin/Cherry-android-arm64
           else
