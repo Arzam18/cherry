@@ -27,13 +27,10 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust (Nightly)
+        uses: dtolnay/rust-toolchain@nightly
         with:
           targets: aarch64-linux-android
-
-      - name: Ensure Target for Active Toolchain
-        run: rustup target add aarch64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
