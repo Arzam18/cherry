@@ -5,8 +5,8 @@ import hashlib
 import os
 
 def main():
-    name = "kiwi"
-    hash = "c3a7bb46d52e88334cdf4cda50997f3a1b2a8e5507e384cbe51f22c1e143d7c2"
+    name = "kiwi-v3"
+    hash = "83b0c14fa69abd7a6e473290abb40a0c5315bb1fa6976d3e618e7743f6219312"
     path = "./networks/default.nnue"
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
