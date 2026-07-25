@@ -27,11 +27,16 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Setup Rust (Pinned Nightly for SIMD compatibility)
+      - name: Setup Rust (Pinned Nightly)
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2024-10-01
           targets: aarch64-linux-android
+
+      - name: Force Default Toolchain & Target
+        run: |
+          rustup default nightly-2024-10-01
+          rustup target add aarch64-linux-android --toolchain nightly-2024-10-01
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
@@ -45,7 +50,7 @@ jobs:
           CARGO_ENCODED_RUSTFLAGS: ""
           CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: ""
         run: |
-          cargo ndk -t arm64-v8a --platform 24 build \
+          cargo +nightly-2024-10-01 ndk -t arm64-v8a --platform 24 build \
             --release \
             -p cherry \
             --config 'build.rustflags=[]' \
