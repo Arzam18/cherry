@@ -27,15 +27,10 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Setup Rust (Nightly)
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup Rust (from repository rust-toolchain)
+        uses: dtolnay/rust-toolchain@master
         with:
           targets: aarch64-linux-android
-
-      - name: Set Nightly as Default and Install Android Target
-        run: |
-          rustup default nightly
-          rustup target add aarch64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
