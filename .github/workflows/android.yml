@@ -38,6 +38,27 @@ jobs:
           rustup default nightly-2024-10-01
           rustup target add aarch64-linux-android --toolchain nightly-2024-10-01
 
+      - name: Auto-patch Cargo.toml for Edition 2024
+        run: |
+          python3 -c '
+          import os
+
+          def patch_cargo_toml(path):
+              with open(path, "r", encoding="utf-8") as f:
+                  content = f.read()
+
+              if "cargo-features" not in content and "edition = \"2024\"" in content:
+                  new_content = "cargo-features = [\"edition2024\"]\n" + content
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(new_content)
+                  print(f"Patched {path} for Edition 2024")
+
+          for root, dirs, files in os.walk("."):
+              for file in files:
+                  if file == "Cargo.toml":
+                      patch_cargo_toml(os.path.join(root, file))
+          '
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
