@@ -27,31 +27,45 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Determine Rust Toolchain
-        id: rust-version
-        run: |
-          TC=""
-          if [ -f "rust-toolchain.toml" ]; then
-            TC=$(grep -i "channel" rust-toolchain.toml | sed -E 's/.*=[[:space:]]*["'\'']?([^"'\''[:space:]]+)["'\'']?.*/\1/' || true)
-          elif [ -f "rust-toolchain" ]; then
-            TC=$(head -n 1 rust-toolchain | tr -d '\r\n ')
-          fi
-
-          if [ -z "$TC" ] || [ "$TC" = "nightly" ]; then
-            TC="nightly-2024-10-01"
-          fi
-
-          echo "Using Rust toolchain: $TC"
-          echo "toolchain=$TC" >> $GITHUB_OUTPUT
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Setup Rust (Nightly)
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: ${{ steps.rust-version.outputs.toolchain }}
           targets: aarch64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
+
+      - name: Auto-patch Rust Source Code for Nightly Compatibility
+        run: |
+          python3 -c '
+          import os, re
+
+          def patch_rs_file(path):
+              with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                  code = f.read()
+
+              original = code
+              code = re.sub(
+                  r"(?:std::)?ptr::from_ref\s*\((.*?)\)\.cast\(\)",
+                  r"((\1) as *const _ as *const _)",
+                  code
+              )
+              code = re.sub(
+                  r"(?:std::)?ptr::from_mut\s*\((.*?)\)\.cast\(\)",
+                  r"((\1) as *mut _ as *mut _)",
+                  code
+              )
+
+              if code != original:
+                  print(f"Auto-patched Rust file: {path}")
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(code)
+
+          for root, dirs, files in os.walk("."):
+              for file in files:
+                  if file.endswith(".rs"):
+                      patch_rs_file(os.path.join(root, file))
+          '
 
       - name: Download Evaluation Net
         run: python3 ./scripts/download_net.py
