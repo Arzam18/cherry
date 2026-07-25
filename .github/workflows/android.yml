@@ -41,16 +41,29 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Auto-patch Pointer Casts
+      - name: Auto-patch Rust Compatibility (Pointers & SIMD Types)
         run: |
           python3 -c '
           import os, re
+
+          simd_header = """
+          #[allow(unused_imports, non_camel_case_types)]
+          use std::simd::*;
+          #[allow(unused_imports, non_camel_case_types)]
+          type Mask8x64 = std::simd::mask8x64;
+          #[allow(unused_imports, non_camel_case_types)]
+          type Mask16x64 = std::simd::mask16x64;
+          #[allow(unused_imports, non_camel_case_types)]
+          type Mask32x64 = std::simd::mask32x64;
+          """
 
           def patch_rs_file(path):
               with open(path, "r", encoding="utf-8", errors="ignore") as f:
                   code = f.read()
 
               original = code
+
+              # 1. Fix raw pointer type inference errors
               code = re.sub(
                   r"(?:std::)?ptr::from_ref\s*\((.*?)\)\.cast\(\)",
                   r"((\1) as *const _ as *const _)",
@@ -61,6 +74,21 @@ jobs:
                   r"((\1) as *mut _ as *mut _)",
                   code
               )
+
+              # 2. Inject missing Mask type aliases
+              if "simd" in code or "Mask8x64" in code or "Mask" in code:
+                  lines = code.splitlines(keepends=True)
+                  insert_idx = 0
+                  for i, line in enumerate(lines):
+                      stripped = line.strip()
+                      if stripped.startswith("#!"):
+                          insert_idx = i + 1
+                      elif stripped == "" or stripped.startswith("//"):
+                          continue
+                      else:
+                          break
+                  lines.insert(insert_idx, simd_header + "\n")
+                  code = "".join(lines)
 
               if code != original:
                   print(f"Auto-patched Rust file: {path}")
