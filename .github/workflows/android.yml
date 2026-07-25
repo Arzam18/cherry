@@ -27,40 +27,51 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Setup Rust (Pinned Nightly)
+      - name: Setup Rust (Nightly 2025-02-20)
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2024-10-01
+          toolchain: nightly-2025-02-20
           targets: aarch64-linux-android
 
       - name: Force Default Toolchain & Target
         run: |
-          rustup default nightly-2024-10-01
-          rustup target add aarch64-linux-android --toolchain nightly-2024-10-01
-
-      - name: Auto-patch Cargo.toml for Edition 2024
-        run: |
-          python3 -c '
-          import os
-
-          def patch_cargo_toml(path):
-              with open(path, "r", encoding="utf-8") as f:
-                  content = f.read()
-
-              if "cargo-features" not in content and "edition = \"2024\"" in content:
-                  new_content = "cargo-features = [\"edition2024\"]\n" + content
-                  with open(path, "w", encoding="utf-8") as f:
-                      f.write(new_content)
-                  print(f"Patched {path} for Edition 2024")
-
-          for root, dirs, files in os.walk("."):
-              for file in files:
-                  if file == "Cargo.toml":
-                      patch_cargo_toml(os.path.join(root, file))
-          '
+          rustup default nightly-2025-02-20
+          rustup target add aarch64-linux-android --toolchain nightly-2025-02-20
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
+
+      - name: Auto-patch Pointer Casts
+        run: |
+          python3 -c '
+          import os, re
+
+          def patch_rs_file(path):
+              with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                  code = f.read()
+
+              original = code
+              code = re.sub(
+                  r"(?:std::)?ptr::from_ref\s*\((.*?)\)\.cast\(\)",
+                  r"((\1) as *const _ as *const _)",
+                  code
+              )
+              code = re.sub(
+                  r"(?:std::)?ptr::from_mut\s*\((.*?)\)\.cast\(\)",
+                  r"((\1) as *mut _ as *mut _)",
+                  code
+              )
+
+              if code != original:
+                  print(f"Auto-patched Rust file: {path}")
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(code)
+
+          for root, dirs, files in os.walk("."):
+              for file in files:
+                  if file.endswith(".rs"):
+                      patch_rs_file(os.path.join(root, file))
+          '
 
       - name: Download Evaluation Net
         run: python3 ./scripts/download_net.py
@@ -71,7 +82,7 @@ jobs:
           CARGO_ENCODED_RUSTFLAGS: ""
           CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: ""
         run: |
-          cargo +nightly-2024-10-01 ndk -t arm64-v8a --platform 24 build \
+          cargo +nightly-2025-02-20 ndk -t arm64-v8a --platform 24 build \
             --release \
             -p cherry \
             --config 'build.rustflags=[]' \
