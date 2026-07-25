@@ -32,6 +32,11 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Ensure Target Standard Library is Installed
+        run: |
+          rustup default nightly
+          rustup target add aarch64-linux-android
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
