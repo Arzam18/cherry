@@ -27,9 +27,27 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Setup Rust (from repository rust-toolchain)
+      - name: Determine Rust Toolchain
+        id: rust-version
+        run: |
+          TC=""
+          if [ -f "rust-toolchain.toml" ]; then
+            TC=$(grep -i "channel" rust-toolchain.toml | sed -E 's/.*=[[:space:]]*["'\'']?([^"'\''[:space:]]+)["'\'']?.*/\1/' || true)
+          elif [ -f "rust-toolchain" ]; then
+            TC=$(head -n 1 rust-toolchain | tr -d '\r\n ')
+          fi
+
+          if [ -z "$TC" ] || [ "$TC" = "nightly" ]; then
+            TC="nightly-2024-10-01"
+          fi
+
+          echo "Using Rust toolchain: $TC"
+          echo "toolchain=$TC" >> $GITHUB_OUTPUT
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.rust-version.outputs.toolchain }}
           targets: aarch64-linux-android
 
       - name: Install cargo-ndk
