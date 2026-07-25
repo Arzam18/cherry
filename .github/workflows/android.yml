@@ -90,7 +90,7 @@ jobs:
           mkdir -p dist/bin
           if [ -f "target/aarch64-linux-android/release/cherry" ]; then
             cp target/aarch64-linux-android/release/cherry dist/bin/Cherry-android-arm64
-          else
+          elif [ -f "target/aarch64-linux-android/release/Cherry" ]; then
             cp target/aarch64-linux-android/release/Cherry dist/bin/Cherry-android-arm64
           fi
 
