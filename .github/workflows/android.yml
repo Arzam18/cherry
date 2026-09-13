@@ -1,135 +1,47 @@
-name: Build Android
+name: Build Cherry Engine (Android ARM64)
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ "*" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "*" ]
-
-permissions:
-  contents: write
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build-android:
+    name: Build Android ARM64
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          lfs: true
-          fetch-depth: 1
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: '3.x'
-
-      - name: Setup Rust (Nightly 2025-02-20)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-02-20
           targets: aarch64-linux-android
 
-      - name: Force Default Toolchain & Target
+      - name: Install Android NDK
         run: |
-          rustup default nightly-2025-02-20
-          rustup target add aarch64-linux-android --toolchain nightly-2025-02-20
+          wget -q https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip -q android-ndk-r26d-linux.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26d" >> $GITHUB_ENV
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
-
-      - name: Auto-patch Rust Compatibility (Pointers & SIMD Types)
+      - name: Download NNUE Network
         run: |
-          python3 -c '
-          import os, re
+          python3 ./scripts/download_net.py || true
 
-          simd_header = """
-          #[allow(unused_imports, non_camel_case_types)]
-          use std::simd::*;
-          #[allow(unused_imports, non_camel_case_types)]
-          type Mask8x64 = std::simd::mask8x64;
-          #[allow(unused_imports, non_camel_case_types)]
-          type Mask16x64 = std::simd::mask16x64;
-          #[allow(unused_imports, non_camel_case_types)]
-          type Mask32x64 = std::simd::mask32x64;
-          """
-
-          def patch_rs_file(path):
-              with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                  code = f.read()
-
-              original = code
-
-              # 1. Fix raw pointer type inference errors
-              code = re.sub(
-                  r"(?:std::)?ptr::from_ref\s*\((.*?)\)\.cast\(\)",
-                  r"((\1) as *const _ as *const _)",
-                  code
-              )
-              code = re.sub(
-                  r"(?:std::)?ptr::from_mut\s*\((.*?)\)\.cast\(\)",
-                  r"((\1) as *mut _ as *mut _)",
-                  code
-              )
-
-              # 2. Inject missing Mask type aliases
-              if "simd" in code or "Mask8x64" in code or "Mask" in code:
-                  lines = code.splitlines(keepends=True)
-                  insert_idx = 0
-                  for i, line in enumerate(lines):
-                      stripped = line.strip()
-                      if stripped.startswith("#!"):
-                          insert_idx = i + 1
-                      elif stripped == "" or stripped.startswith("//"):
-                          continue
-                      else:
-                          break
-                  lines.insert(insert_idx, simd_header + "\n")
-                  code = "".join(lines)
-
-              if code != original:
-                  print(f"Auto-patched Rust file: {path}")
-                  with open(path, "w", encoding="utf-8") as f:
-                      f.write(code)
-
-          for root, dirs, files in os.walk("."):
-              for file in files:
-                  if file.endswith(".rs"):
-                      patch_rs_file(os.path.join(root, file))
-          '
-
-      - name: Download Evaluation Net
-        run: python3 ./scripts/download_net.py
-
-      - name: Build Cherry for Android
-        env:
-          RUSTFLAGS: ""
-          CARGO_ENCODED_RUSTFLAGS: ""
-          CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: ""
+      - name: Build Android Binary
         run: |
-          cargo +nightly-2025-02-20 ndk -t arm64-v8a --platform 24 build \
-            --release \
-            -p cherry \
-            --config 'build.rustflags=[]' \
-            --config 'target.aarch64-linux-android.rustflags=[]'
+          TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          export CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android24-clang
+          export AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android24-clang
 
-          mkdir -p dist/bin
-          if [ -f "target/aarch64-linux-android/release/cherry" ]; then
-            cp target/aarch64-linux-android/release/cherry dist/bin/Cherry-android-arm64
-          elif [ -f "target/aarch64-linux-android/release/Cherry" ]; then
-            cp target/aarch64-linux-android/release/Cherry dist/bin/Cherry-android-arm64
-          fi
+          cargo rustc --release --target aarch64-linux-android -p cherry -- --emit link=cherry-android
 
-      - name: Verify Binary
-        run: |
-          ls -lh dist/bin/
-          file dist/bin/*
-
-      - name: Upload Android Artifact
+      - name: Upload Android Executable
         uses: actions/upload-artifact@v4
         with:
           name: cherry-android-arm64
-          path: dist/bin/*
+          path: cherry-android
