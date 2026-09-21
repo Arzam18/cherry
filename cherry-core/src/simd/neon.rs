@@ -216,11 +216,15 @@ impl u64x2 {
     #[inline] pub fn shr<const N: i32>(self) -> Self { unsafe { Self(vshrq_n_u64::<N>(self.0)) } }
     #[inline] pub fn extract<const I: i32>(self) -> u64 { unsafe { vgetq_lane_u64::<I>(self.0) } }
     #[inline] pub fn broadcast8(self) -> u64x8 { u64x8([self, self, self, self]) }
+    // Bit-pun reinterpretations, matching AVX2's `impl_conv!`.
+    #[inline] pub fn to_u8x16(self) -> u8x16 { unsafe { u8x16(vreinterpretq_u8_u64(self.0)) } }
+    #[inline] pub fn to_u16x8(self) -> u16x8 { unsafe { u16x8(vreinterpretq_u16_u64(self.0)) } }
+    #[inline] pub fn to_u32x4(self) -> u32x4 { unsafe { u32x4(vreinterpretq_u32_u64(self.0)) } }
 }
 impl From<uint64x2_t> for u64x2 { #[inline] fn from(v: uint64x2_t) -> Self { Self(v) } }
 impl From<[u64; 2]> for u64x2 { #[inline] fn from(a: [u64; 2]) -> Self { unsafe { Self::load(a.as_ptr()) } } }
-// NOTE: aarch64 NEON has no `vmvnq_u64` (the MVN instruction is only defined for
-// 8/16/32-bit elements). Emulate NOT by XORing with all-ones.
+// NOTE: aarch64 NEON has no `vmvnq_u64` (MVN is only defined for 8/16/32-bit
+// elements). Emulate NOT by XORing with all-ones.
 impl Not for u64x2 { type Output = Self; #[inline] fn not(self) -> Self { unsafe { Self(veorq_u64(self.0, vdupq_n_u64(u64::MAX))) } } }
 impl BitAnd for u64x2 { type Output = Self; #[inline] fn bitand(self, o: Self) -> Self { unsafe { Self(vandq_u64(self.0, o.0)) } } }
 impl BitOr  for u64x2 { type Output = Self; #[inline] fn bitor (self, o: Self) -> Self { unsafe { Self(vorrq_u64(self.0, o.0)) } } }
