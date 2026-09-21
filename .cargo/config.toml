@@ -1,2 +1,12 @@
-[build]
-rustflags=["-Ctarget-cpu=native"]
+# Only apply the "native" tuning when we are NOT cross-compiling to ARM/Android.
+# Cross-compiling with `-Ctarget-cpu=native` bakes the *host* CPU's features
+# into the target binary, which produces SIGILL on the device.
+#
+# To opt into native tuning for your own builds, run:
+#   RUSTFLAGS="-Ctarget-cpu=native" cargo build --release
+
+[target.'cfg(all(target_arch = "x86_64", not(target_os = "android")))']
+rustflags = ["-Ctarget-cpu=native"]
+
+[target.'cfg(all(target_arch = "x86", not(target_os = "android")))']
+rustflags = ["-Ctarget-cpu=native"]
