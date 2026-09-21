@@ -219,7 +219,9 @@ impl u64x2 {
 }
 impl From<uint64x2_t> for u64x2 { #[inline] fn from(v: uint64x2_t) -> Self { Self(v) } }
 impl From<[u64; 2]> for u64x2 { #[inline] fn from(a: [u64; 2]) -> Self { unsafe { Self::load(a.as_ptr()) } } }
-impl Not for u64x2 { type Output = Self; #[inline] fn not(self) -> Self { unsafe { Self(vmvnq_u64(self.0)) } } }
+// NOTE: aarch64 NEON has no `vmvnq_u64` (the MVN instruction is only defined for
+// 8/16/32-bit elements). Emulate NOT by XORing with all-ones.
+impl Not for u64x2 { type Output = Self; #[inline] fn not(self) -> Self { unsafe { Self(veorq_u64(self.0, vdupq_n_u64(u64::MAX))) } } }
 impl BitAnd for u64x2 { type Output = Self; #[inline] fn bitand(self, o: Self) -> Self { unsafe { Self(vandq_u64(self.0, o.0)) } } }
 impl BitOr  for u64x2 { type Output = Self; #[inline] fn bitor (self, o: Self) -> Self { unsafe { Self(vorrq_u64(self.0, o.0)) } } }
 impl BitXor for u64x2 { type Output = Self; #[inline] fn bitxor(self, o: Self) -> Self { unsafe { Self(veorq_u64(self.0, o.0)) } } }
@@ -504,6 +506,7 @@ macro_rules! def_mask {
         #[derive(Debug, Copy, Clone)]
         pub struct $name(pub $vec);
         impl From<$vec> for $name { #[inline] fn from(v: $vec) -> Self { Self(v) } }
+        impl From<$bitmask> for $name { #[inline] fn from(v: $bitmask) -> Self { Self::expand(v) } }
         impl Not for $name { type Output = Self; #[inline] fn not(self) -> Self { Self(!self.0) } }
         impl BitAnd for $name { type Output = Self; #[inline] fn bitand(self, o: Self) -> Self { Self(self.0 & o.0) } }
         impl BitOr  for $name { type Output = Self; #[inline] fn bitor (self, o: Self) -> Self { Self(self.0 | o.0) } }
@@ -612,6 +615,7 @@ impl Mask8x32 {
     }
     #[inline] pub fn expand(bm: u32) -> Self { Mask8x32([Mask8x16::expand(bm as u16), Mask8x16::expand((bm >> 16) as u16)]) }
 }
+impl From<u32> for Mask8x32 { #[inline] fn from(v: u32) -> Self { Self::expand(v) } }
 impl BitAnd<u32> for Mask8x32 { type Output = Self; #[inline] fn bitand(self, rhs: u32) -> Self { self & Self::expand(rhs) } }
 impl BitOr <u32> for Mask8x32 { type Output = Self; #[inline] fn bitor (self, rhs: u32) -> Self { self | Self::expand(rhs) } }
 
@@ -630,6 +634,7 @@ impl Mask8x64 {
                   Mask8x16::expand((bm >> 32) as u16), Mask8x16::expand((bm >> 48) as u16)])
     }
 }
+impl From<u64> for Mask8x64 { #[inline] fn from(v: u64) -> Self { Self::expand(v) } }
 impl BitAnd<u64> for Mask8x64 { type Output = Self; #[inline] fn bitand(self, rhs: u64) -> Self { self & Self::expand(rhs) } }
 impl BitOr <u64> for Mask8x64 { type Output = Self; #[inline] fn bitor (self, rhs: u64) -> Self { self | Self::expand(rhs) } }
 impl BitXor<u64> for Mask8x64 { type Output = Self; #[inline] fn bitxor(self, rhs: u64) -> Self { self ^ Self::expand(rhs) } }
@@ -642,6 +647,7 @@ impl Mask16x16 {
     }
     #[inline] pub fn expand(bm: u16) -> Self { Mask16x16([Mask16x8::expand(bm as u8), Mask16x8::expand((bm >> 8) as u8)]) }
 }
+impl From<u16> for Mask16x16 { #[inline] fn from(v: u16) -> Self { Self::expand(v) } }
 impl BitAnd<u16> for Mask16x16 { type Output = Self; #[inline] fn bitand(self, rhs: u16) -> Self { self & Self::expand(rhs) } }
 impl BitOr <u16> for Mask16x16 { type Output = Self; #[inline] fn bitor (self, rhs: u16) -> Self { self | Self::expand(rhs) } }
 
@@ -655,6 +661,7 @@ impl Mask16x32 {
                    Mask16x8::expand((bm >> 16) as u8), Mask16x8::expand((bm >> 24) as u8)])
     }
 }
+impl From<u32> for Mask16x32 { #[inline] fn from(v: u32) -> Self { Self::expand(v) } }
 impl BitAnd<u32> for Mask16x32 { type Output = Self; #[inline] fn bitand(self, rhs: u32) -> Self { self & Self::expand(rhs) } }
 impl BitOr <u32> for Mask16x32 { type Output = Self; #[inline] fn bitor (self, rhs: u32) -> Self { self | Self::expand(rhs) } }
 
@@ -666,6 +673,7 @@ impl Mask32x8 {
     }
     #[inline] pub fn expand(bm: u8) -> Self { Mask32x8([Mask32x4::expand(bm & 0xF), Mask32x4::expand((bm >> 4) & 0xF)]) }
 }
+impl From<u8> for Mask32x8 { #[inline] fn from(v: u8) -> Self { Self::expand(v) } }
 impl BitAnd<u8> for Mask32x8 { type Output = Self; #[inline] fn bitand(self, rhs: u8) -> Self { self & Self::expand(rhs) } }
 impl BitOr <u8> for Mask32x8 { type Output = Self; #[inline] fn bitor (self, rhs: u8) -> Self { self | Self::expand(rhs) } }
 
@@ -679,6 +687,7 @@ impl Mask32x16 {
                    Mask32x4::expand(((bm >> 8) & 0xF) as u8), Mask32x4::expand(((bm >> 12) & 0xF) as u8)])
     }
 }
+impl From<u16> for Mask32x16 { #[inline] fn from(v: u16) -> Self { Self::expand(v) } }
 impl BitAnd<u16> for Mask32x16 { type Output = Self; #[inline] fn bitand(self, rhs: u16) -> Self { self & Self::expand(rhs) } }
 impl BitOr <u16> for Mask32x16 { type Output = Self; #[inline] fn bitor (self, rhs: u16) -> Self { self | Self::expand(rhs) } }
 
