@@ -1,0 +1,225 @@
+name: Bundle Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_binaries:
+        description: 'Also list binary file names in a manifest (contents never inlined)'
+        type: boolean
+        default: true
+      max_file_size:
+        description: 'Max individual file size in bytes (larger files are listed but not inlined)'
+        required: false
+        default: '524288'
+
+jobs:
+  bundle:
+    name: Bundle all source into one file
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Generate source bundle
+        env:
+          MAX_FILE: ${{ inputs.max_file_size || '524288' }}
+          INCLUDE_BINARIES: ${{ inputs.include_binaries }}
+        run: |
+          set -euo pipefail
+
+          OUT="bundle-${GITHUB_REPOSITORY##*/}.txt"
+          MAX="${MAX_FILE:-524288}"
+
+          # ---------- 1. Extensions we WILL inline ----------
+          # Language-agnostic: any mainstream source/text file.
+          INCLUDE_EXT_RE='\.(c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx|ipp|inl|inc|asm|s|S|
+                            rs|zig|cs|nim|nims|java|kt|kts|scala|groovy|gradle|
+                            py|pyi|pyx|rb|php|pl|pm|lua|
+                            go|swift|m|mm|dart|
+                            js|jsx|mjs|cjs|ts|tsx|vue|svelte|
+                            sh|bash|zsh|fish|ps1|bat|cmd|
+                            ml|mli|hs|lhs|ex|exs|erl|hrl|clj|cljs|cljc|
+                            f|f90|f95|for|
+                            r|jl|nb|
+                            md|markdown|rst|txt|adoc|
+                            yml|yaml|toml|json|jsonc|json5|ini|cfg|conf|properties|
+                            cmake|mk|gradle|pro|pri|pbxproj|
+                            xml|xsd|xslt|html|htm|css|scss|sass|less|
+                            sql|csv|tsv|
+                            proto|thrift|graphql|gql|
+                            tex|bib|
+                            v|sv|vh|vhd|
+                            wat|wasm|
+                            d|di|
+                            cr|ecr)$'
+
+          # ---------- 2. Specific filenames (no extension) we WILL inline ----------
+          INCLUDE_NAME_RE='(^|/)(CMakeLists\.txt|Makefile|makefile|GNUmakefile|
+                            meson\.build|BUILD|BUILD\.bazel|WORKSPACE|WORKSPACE\.bazel|
+                            Cargo\.toml|Cargo\.lock|rust-toolchain|rust-toolchain\.toml|
+                            build\.gradle|build\.gradle\.kts|settings\.gradle|settings\.gradle\.kts|
+                            package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|
+                            tsconfig\.json|jsconfig\.json|
+                            Pipfile|Pipfile\.lock|pyproject\.toml|setup\.py|setup\.cfg|requirements\.txt|
+                            Gemfile|Gemfile\.lock|Rakefile|
+                            go\.mod|go\.sum|
+                            pubspec\.yaml|pubspec\.lock|
+                            mix\.exs|mix\.lock|
+                            project\.clj|deps\.edn|
+                            CMakePresets\.json|
+                            Dockerfile|docker-compose\.yml|docker-compose\.yaml|
+                            \.gitignore|\.gitattributes|\.editorconfig|
+                            \.clang-format|\.clang-tidy|\.rustfmt\.toml|
+                            \.cargo/config\.toml)$'
+
+          # ---------- 3. Patterns we ALWAYS exclude ----------
+          # .git/ is already skipped by git ls-files, but we also block
+          # any vendored/dependency dirs that might be tracked.
+          EXCLUDE_PATH_RE='(^|/)(\.git/|target/|build/|dist/|out/|node_modules/|
+                            vendor/|\.cargo/registry/|__pycache__/|
+                            \.idea/|\.vscode/|\.vs/)'
+
+          # ---------- 4. Licence / legal files we always exclude ----------
+          EXCLUDE_LICENCE_RE='(^|/)(LICENSE|LICENSE\.|LICENCE|LICENCE\.|COPYING|COPYING\.|
+                               NOTICE|NOTICE\.|AUTHORS|AUTHORS\.|CONTRIBUTORS|CONTRIBUTORS\.|
+                               PATENTS|PATENTS\.|THANKS|THANKS\.)'
+
+          # ---------- 5. Binary extensions we never inline ----------
+          BINARY_EXT_RE='\.(bin|nnue|binpack|epd|
+                           png|jpg|jpeg|gif|bmp|webp|ico|tif|tiff|svgz|
+                           zip|tar|gz|bz2|xz|7z|rar|zst|
+                           so|dylib|dll|a|lib|o|obj|pdb|
+                           exe|out|
+                           class|jar|war|ear|
+                           wasm|
+                           pdf|ps|
+                           mp3|mp4|wav|ogg|flac|webm|mov|avi|
+                           ttf|otf|woff|woff2|
+                           db|sqlite|sqlite3|
+                           pack|idx|
+                           pt|pth|onnx|safetensors|gguf|
+                           npz|npy|
+                           pyc|pyo)$'
+
+          # ---------- Build the file lists ----------
+          mapfile -t ALL_TRACKED < <(git ls-files || true)
+
+          # Inline list: source + config that isn't excluded or binary.
+          mapfile -t SOURCE_FILES < <(
+            git ls-files \
+              | grep -E -i "$INCLUDE_EXT_RE|$INCLUDE_NAME_RE" \
+              | grep -v -E -i "$EXCLUDE_PATH_RE" \
+              | grep -v -E -i "$EXCLUDE_LICENCE_RE" \
+              | grep -v -E -i "$BINARY_EXT_RE" \
+              | sort || true
+          )
+
+          # Binary list (only for the manifest, never inlined).
+          mapfile -t BINARY_FILES < <(
+            git ls-files \
+              | grep -E -i "$BINARY_EXT_RE" \
+              | sort || true
+          )
+
+          # Licence list (for the manifest so the user can see what was skipped).
+          mapfile -t LICENCE_FILES < <(
+            git ls-files \
+              | grep -E -i "$EXCLUDE_LICENCE_RE" \
+              | sort || true
+          )
+
+          # ---------- Write the bundle ----------
+          {
+            echo "===================== REPOSITORY MANIFEST ====================="
+            echo "Repository : ${GITHUB_REPOSITORY}"
+            echo "Commit     : $(git rev-parse HEAD 2>/dev/null || echo unknown)"
+            echo "Branch/tag : ${GITHUB_REF_NAME}"
+            echo "Generated  : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Runner     : ${RUNNER_OS}"
+            echo "Run ID     : ${GITHUB_RUN_ID}"
+            echo "Max inline : ${MAX} bytes per file"
+            echo ""
+            echo "Tracked files total : ${#ALL_TRACKED[@]}"
+            echo "Inlined source files: ${#SOURCE_FILES[@]}"
+            echo "Binary files        : ${#BINARY_FILES[@]}"
+            echo "Licence files       : ${#LICENCE_FILES[@]}"
+            echo ""
+            echo "===================== FILE TREE (all tracked) ====================="
+            printf '%s\n' "${ALL_TRACKED[@]}"
+            echo ""
+            echo "===================== RECENT COMMITS ====================="
+            git --no-pager log --oneline -30 --no-decorate 2>/dev/null \
+              || echo "(no git history available)"
+            echo ""
+
+            echo "===================== EXCLUDED — LICENCE / LEGAL ====================="
+            if [ "${#LICENCE_FILES[@]}" -eq 0 ]; then
+              echo "(none)"
+            else
+              printf '  %s\n' "${LICENCE_FILES[@]}"
+            fi
+            echo ""
+
+            echo "===================== EXCLUDED — BINARY ====================="
+            if [ "${#BINARY_FILES[@]}" -eq 0 ]; then
+              echo "(none)"
+            else
+              for f in "${BINARY_FILES[@]}"; do
+                [ -f "$f" ] || continue
+                sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+                printf '  %-60s  %10d bytes\n' "$f" "$sz"
+              done
+            fi
+            echo ""
+
+            echo "===================== SOURCE FILES ====================="
+            for f in "${SOURCE_FILES[@]}"; do
+              [ -f "$f" ] || continue
+
+              sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+              enc=$(file -b --mime-encoding "$f" 2>/dev/null || echo unknown)
+
+              echo ""
+              echo "===================== FILE: $f ====================="
+              echo "SIZE: ${sz} bytes"
+              echo "ENCODING: ${enc}"
+
+              if [ "$sz" -gt "$MAX" ]; then
+                echo "(SKIPPED — ${sz} bytes exceeds max_file_size of ${MAX})"
+                echo "===================== END FILE: $f ====================="
+                continue
+              fi
+
+              if printf '%s' "$enc" | grep -qiE 'binary'; then
+                echo "(SKIPPED — binary content)"
+                echo "===================== END FILE: $f ====================="
+                continue
+              fi
+
+              echo "----- BEGIN CONTENT -----"
+              cat "$f"
+              echo ""
+              echo "----- END CONTENT -----"
+              echo "===================== END FILE: $f ====================="
+            done
+
+            echo ""
+            echo "===================== END OF BUNDLE ====================="
+          } > "$OUT"
+
+          echo "Bundle: $OUT"
+          echo "Size:   $(stat -c%s "$OUT") bytes"
+          echo "Lines:  $(wc -l < "$OUT")"
+          echo "Files:  ${#SOURCE_FILES[@]}"
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-bundle
+          path: bundle-*.txt
+          if-no-files-found: error
+          retention-days: 30
