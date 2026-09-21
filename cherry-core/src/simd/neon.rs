@@ -294,8 +294,13 @@ impl u8x32 {
     #[inline] pub fn to_bitmask(self) -> u32 {
         (self.0[0].to_bitmask() as u32) | ((self.0[1].to_bitmask() as u32) << 16)
     }
-    #[inline] pub fn mask(self, m: Mask8x32) -> Self { self & m.0 }
-    #[inline] pub fn blend(a: Self, b: Self, m: Mask8x32) -> Self { (m.0 & b) | m.0.andnot(a) }
+    #[inline] pub fn mask(self, m: Mask8x32) -> Self {
+        u8x32([self.0[0].mask(m.0[0]), self.0[1].mask(m.0[1])])
+    }
+    #[inline] pub fn blend(a: Self, b: Self, m: Mask8x32) -> Self {
+        u8x32([u8x16::blend(a.0[0], b.0[0], m.0[0]),
+               u8x16::blend(a.0[1], b.0[1], m.0[1])])
+    }
     #[inline] pub fn compress(self, m: Mask8x32) -> Self { unsafe {
         let mask = m.to_bitmask();
         let flat: [u8; 32] = mem::transmute(self.0);
@@ -329,8 +334,16 @@ impl u8x64 {
         (self.0[0].to_bitmask() as u64) | ((self.0[1].to_bitmask() as u64) << 16)
             | ((self.0[2].to_bitmask() as u64) << 32) | ((self.0[3].to_bitmask() as u64) << 48)
     }
-    #[inline] pub fn mask(self, m: Mask8x64) -> Self { self & m.0 }
-    #[inline] pub fn blend(a: Self, b: Self, m: Mask8x64) -> Self { (m.0 & b) | m.0.andnot(a) }
+    #[inline] pub fn mask(self, m: Mask8x64) -> Self {
+        u8x64([self.0[0].mask(m.0[0]), self.0[1].mask(m.0[1]),
+               self.0[2].mask(m.0[2]), self.0[3].mask(m.0[3])])
+    }
+    #[inline] pub fn blend(a: Self, b: Self, m: Mask8x64) -> Self {
+        u8x64([u8x16::blend(a.0[0], b.0[0], m.0[0]),
+               u8x16::blend(a.0[1], b.0[1], m.0[1]),
+               u8x16::blend(a.0[2], b.0[2], m.0[2]),
+               u8x16::blend(a.0[3], b.0[3], m.0[3])])
+    }
     #[inline] pub fn compress(self, m: Mask8x64) -> Self { unsafe {
         let mask = m.to_bitmask();
         let flat: [u8; 64] = mem::transmute(self.0);
@@ -390,8 +403,13 @@ impl u16x16 {
     #[inline] pub fn to_bitmask(self) -> u16 {
         (self.0[0].to_bitmask() as u16) | ((self.0[1].to_bitmask() as u16) << 8)
     }
-    #[inline] pub fn mask(self, m: Mask16x16) -> Self { self & m.0 }
-    #[inline] pub fn blend(a: Self, b: Self, m: Mask16x16) -> Self { (m.0 & b) | m.0.andnot(a) }
+    #[inline] pub fn mask(self, m: Mask16x16) -> Self {
+        u16x16([self.0[0].mask(m.0[0]), self.0[1].mask(m.0[1])])
+    }
+    #[inline] pub fn blend(a: Self, b: Self, m: Mask16x16) -> Self {
+        u16x16([u16x8::blend(a.0[0], b.0[0], m.0[0]),
+                u16x8::blend(a.0[1], b.0[1], m.0[1])])
+    }
     #[inline] pub fn compress(self, m: Mask16x16) -> Self { unsafe {
         let mask = m.to_bitmask();
         let flat: [u16; 16] = mem::transmute(self.0);
@@ -431,8 +449,16 @@ impl u16x32 {
         (self.0[0].to_bitmask() as u32) | ((self.0[1].to_bitmask() as u32) << 8)
             | ((self.0[2].to_bitmask() as u32) << 16) | ((self.0[3].to_bitmask() as u32) << 24)
     }
-    #[inline] pub fn mask(self, m: Mask16x32) -> Self { self & m.0 }
-    #[inline] pub fn blend(a: Self, b: Self, m: Mask16x32) -> Self { (m.0 & b) | m.0.andnot(a) }
+    #[inline] pub fn mask(self, m: Mask16x32) -> Self {
+        u16x32([self.0[0].mask(m.0[0]), self.0[1].mask(m.0[1]),
+                self.0[2].mask(m.0[2]), self.0[3].mask(m.0[3])])
+    }
+    #[inline] pub fn blend(a: Self, b: Self, m: Mask16x32) -> Self {
+        u16x32([u16x8::blend(a.0[0], b.0[0], m.0[0]),
+                u16x8::blend(a.0[1], b.0[1], m.0[1]),
+                u16x8::blend(a.0[2], b.0[2], m.0[2]),
+                u16x8::blend(a.0[3], b.0[3], m.0[3])])
+    }
     #[inline] pub fn compress(self, m: Mask16x32) -> Self { unsafe {
         let mask = m.to_bitmask();
         let flat: [u16; 32] = mem::transmute(self.0);
