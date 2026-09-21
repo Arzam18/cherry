@@ -35,7 +35,9 @@ jobs:
       - name: Download NNUE Network
         run: python3 ./scripts/download_net.py
 
-      - name: Build
+      - name: Build (capture full log)
+        id: build
+        continue-on-error: true
         env:
           NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
           TOOLCHAIN: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -50,17 +52,43 @@ jobs:
           # Enable NEON, fp16, and dot-product. NEON is baseline on aarch64,
           # but +dotprod and +fp16 give meaningful NNUE speedups on any
           # device from ~2018 onward. Remove them for older SoCs.
+          #
+          # `tee log.txt` captures the full compiler output. `|| true` and
+          # `continue-on-error: true` ensure the job doesn't abort before
+          # we get a chance to upload the log artifact.
           cargo rustc \
             --release \
             --target "$TARGET" \
             -p cherry \
             --config 'target.aarch64-linux-android.rustflags=["-Ctarget-feature=+neon,+fp16,+dotprod","-Ctarget-cpu=generic"]' \
-            -- --emit link=cherry-android
+            -- --emit link=cherry-android 2>&1 | tee log.txt || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: log.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show error summary
+        if: always()
+        run: |
+          if [ -f log.txt ]; then
+            echo "=== Total lines: $(wc -l < log.txt) ==="
+            echo "=== Error count: $(grep -c '^error' log.txt || echo 0) ==="
+            echo ""
+            echo "=== First 40 error lines ==="
+            grep -nE '^error(\[|:)|^  --> ' log.txt | head -40 || true
+          fi
 
       - name: Inspect binary
+        if: success()
         run: file cherry-android
 
       - name: Upload Android Executable
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: cherry-android-arm64
