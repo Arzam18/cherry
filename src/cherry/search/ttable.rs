@@ -208,13 +208,21 @@ impl TTable {
     }
 
     #[inline]
-    pub fn prefetch(&self, board: &Board) {
-        unsafe {
-            _mm_prefetch::<_MM_HINT_T0>(
-                ptr::from_ref(&self.clusters[self.index(board.hash())]).cast(),
-            )
-        }
+pub fn prefetch(&self, board: &Board) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        _mm_prefetch::<_MM_HINT_T0>(
+            ptr::from_ref(&self.clusters[self.index(board.hash())]).cast(),
+        )
     }
+
+    // ARM64: no equivalent intrinsic. The hardware prefetcher handles
+    // the transposition-table access pattern well enough.
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = board;
+    }
+}
 
     #[inline]
     pub fn fetch(&self, board: &Board, ply: u16) -> Option<TTData> {
