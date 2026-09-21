@@ -1,4 +1,4 @@
-use core::{ops::*, ptr};
+use core::ops::*;
 
 use crate::*;
 
@@ -70,7 +70,7 @@ pub struct Byteboard(pub u8x64);
 impl Byteboard {
     #[inline]
     pub fn as_mailbox(&self) -> &[Place; Square::COUNT] {
-        unsafe { &*ptr::from_ref(&self.0).cast() }
+        unsafe { core::mem::transmute::<&u8x64, &[Place; Square::COUNT]>(&self.0) }
     }
 
     /*----------------------------------------------------------------*/
@@ -151,7 +151,7 @@ pub struct Wordboard(pub u16x64);
 impl Wordboard {
     #[inline]
     pub fn as_mailbox(&self) -> &[PieceMask; Square::COUNT] {
-        unsafe { &*ptr::from_ref(&self.0).cast() }
+        unsafe { core::mem::transmute::<&u16x64, &[PieceMask; Square::COUNT]>(&self.0) }
     }
 
     /*----------------------------------------------------------------*/
@@ -294,4 +294,4 @@ impl IndexMut<PieceIndex> for IndexToSquare {
     fn index_mut(&mut self, index: PieceIndex) -> &mut Self::Output {
         &mut self.0[index.0 as usize]
     }
-}
+                 }
