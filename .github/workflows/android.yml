@@ -1,0 +1,68 @@
+name: Build Cherry Engine (Android ARM64)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android ARM64 (NEON)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The repo pins nightly-2026-01-04 via rust-toolchain; the action
+      # respects that file, but we set it explicitly for clarity.
+      - name: Install Rust Nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-01-04
+          targets: aarch64-linux-android
+          components: rust-src, llvm-tools
+
+      - name: Install Android NDK r27
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27
+          add-to-path: false
+
+      - name: Download NNUE Network
+        run: python3 ./scripts/download_net.py
+
+      - name: Build
+        env:
+          NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+          TOOLCHAIN: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin
+          API: 24
+          TARGET: aarch64-linux-android
+        run: |
+          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android${API}-clang"
+          export CXX_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android${API}-clang++"
+          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+
+          # Enable NEON, fp16, and dot-product. NEON is baseline on aarch64,
+          # but +dotprod and +fp16 give meaningful NNUE speedups on any
+          # device from ~2018 onward. Remove them for older SoCs.
+          cargo rustc \
+            --release \
+            --target "$TARGET" \
+            -p cherry \
+            --config 'target.aarch64-linux-android.rustflags=["-Ctarget-feature=+neon,+fp16,+dotprod","-Ctarget-cpu=generic"]' \
+            -- --emit link=cherry-android
+
+      - name: Inspect binary
+        run: file cherry-android
+
+      - name: Upload Android Executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: cherry-android-arm64
+          path: cherry-android
+          if-no-files-found: error
