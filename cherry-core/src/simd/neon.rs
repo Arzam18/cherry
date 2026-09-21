@@ -468,11 +468,8 @@ impl u32x8 { #[inline] pub fn zero_ext(self) -> u64x8 {
     u64x8([a.0[0], a.0[1], b.0[0], b.0[1]])
 } }
 
-impl u32x16 { #[inline] pub fn zero_ext(self) -> u64x8 {
-    let a = self.0[0].zero_ext(); let b = self.0[1].zero_ext();
-    let c = self.0[2].zero_ext(); let d = self.0[3].zero_ext();
-    u64x8([a.0[0], a.0[1], b.0[0], b.0[1], c.0[0], c.0[1], d.0[0], d.0[1]])
-} }
+// u32x16 has no zero_ext: zero-extending 16×u32 → 16×u64 needs a 1024-bit
+// output type that does not exist and is not needed by Cherry.
 
 /* ==================== 128-bit masks ==================== */
 
