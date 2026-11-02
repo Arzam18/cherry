@@ -1,18 +1,3 @@
-//! ARM64 NEON move generator.
-//!
-//! Cherry's move generator abstracts over SIMD via `Wordboard`,
-//! `IndexToSquare`, and `PieceMask`; the only vector ops the generator
-//! itself performs go through those types' `for_mask` / `get` / `iter`
-//! methods. The AVX2 variant is therefore pure scalar code, and this
-//! NEON variant is byte-for-byte the same logic — the difference lives
-//! entirely in the SIMD layer above.
-//!
-//! If movegen later shows up in a profile, the AVX-512 approach of
-//! using `compress_store` for bulk quiet/pawn writes can be ported to
-//! NEON (`vqtbl1q_u8` / `vqtbl2q_u8`-based compaction), but for now we
-//! keep the semantics identical to the AVX2 build to make cross-arch
-//! regression testing trivial.
-
 use core::ops::{Deref, DerefMut};
 
 use arrayvec::ArrayVec;
