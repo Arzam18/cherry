@@ -76,7 +76,7 @@ jobs:
           echo "83b0c14fa69abd7a6e473290abb40a0c5315bb1fa6976d3e618e7743f6219312  networks/default.nnue" | sha256sum --check
           ls -lh networks/default.nnue
 
-      - name: Configure Android cross-compilation
+      - name: Configure host SIMD and Android cross-compilation
         shell: bash
         env:
           ANDROID_NDK: ${{ steps.ndk.outputs.ndk }}
@@ -84,6 +84,44 @@ jobs:
         run: |
           set -euo pipefail
           LINKER="$ANDROID_TOOLCHAIN/aarch64-linux-android24-clang"
+
+          # Cherry's build.rs imports cherry-core as a build dependency.
+          # Cargo compiles that copy for the host, but with --target set it
+          # does not pass target rustflags to host build dependencies.
+          # Apply AVX2 only to the host cherry-core compilation. BMI2 stays
+          # disabled so build.rs generates the same normal-magic slider table
+          # layout used by the Android AArch64 build.
+          WRAPPER="$RUNNER_TEMP/cherry-rustc-wrapper.sh"
+          cat > "$WRAPPER" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          RUSTC="$1"
+          shift
+
+          IS_CHERRY_CORE=0
+          HAS_TARGET=0
+          PREVIOUS=""
+
+          for ARG in "$@"; do
+            if [[ "$PREVIOUS" == "--crate-name" && "$ARG" == "cherry_core" ]]; then
+              IS_CHERRY_CORE=1
+            fi
+            if [[ "$ARG" == "--target" || "$ARG" == --target=* ]]; then
+              HAS_TARGET=1
+            fi
+            PREVIOUS="$ARG"
+          done
+
+          if [[ "$IS_CHERRY_CORE" -eq 1 && "$HAS_TARGET" -eq 0 ]]; then
+            echo "[rustc wrapper] host cherry-core: AVX2 enabled, BMI2 disabled" >&2
+            exec "$RUSTC" "$@" -Ctarget-cpu=x86-64 -Ctarget-feature=+avx2,-bmi2
+          fi
+
+          exec "$RUSTC" "$@"
+          SH
+          chmod +x "$WRAPPER"
+          echo "RUSTC_WRAPPER=$WRAPPER" >> "$GITHUB_ENV"
 
           {
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER"
