@@ -1,7 +1,7 @@
-use core::{ptr, sync::atomic::*};
+use core::sync::atomic::*;
 
 #[cfg(target_arch = "x86_64")]
-use core::arch::x86_64::*;
+use core::{arch::x86_64::*, ptr};
 
 use crate::*;
 
@@ -208,21 +208,19 @@ impl TTable {
     }
 
     #[inline]
-pub fn prefetch(&self, board: &Board) {
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        _mm_prefetch::<_MM_HINT_T0>(
-            ptr::from_ref(&self.clusters[self.index(board.hash())]).cast(),
-        )
-    }
+    pub fn prefetch(&self, board: &Board) {
+        let cluster = &self.clusters[self.index(board.hash())];
 
-    // ARM64: no equivalent intrinsic. The hardware prefetcher handles
-    // the transposition-table access pattern well enough.
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        let _ = board;
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            _mm_prefetch::<_MM_HINT_T0>(ptr::from_ref(cluster).cast());
+        }
+
+        // ARM64 currently has no equivalent stable Rust intrinsic here.
+        // Keep the address observable without changing transposition-table behavior.
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = core::hint::black_box(cluster);
     }
-}
 
     #[inline]
     pub fn fetch(&self, board: &Board, ply: u16) -> Option<TTData> {
