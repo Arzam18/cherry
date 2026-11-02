@@ -1,5 +1,15 @@
 [build]
 rustflags = ["-Ctarget-cpu=native"]
 
+# Cherry's build.rs depends on cherry-core and compiles that crate for the
+# Ubuntu GitHub Actions host as well as for the Android target.  The host
+# build must select Cherry's existing AVX2 backend; otherwise none of the
+# SIMD vector types are exported and cherry-core fails before the Android
+# build is reached.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Ctarget-cpu=x86-64-v3"]
+
+# The actual engine binary remains an Android AArch64 build using NEON and
+# Dotprod.  This target-specific setting takes precedence over [build].
 [target.aarch64-linux-android]
 rustflags = ["-Ctarget-cpu=cortex-a76", "-Ctarget-feature=+neon,+dotprod"]
