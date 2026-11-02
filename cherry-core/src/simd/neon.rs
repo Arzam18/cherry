@@ -368,6 +368,94 @@ impl u64x2 {
 
 /*----------------------------------------------------------------*/
 
+/// Eight 64-bit lanes, represented as four 128-bit NEON vectors.
+///
+/// Cherry uses this vector in static-exchange evaluation to select the first
+/// piece class whose ray bitboard intersects the current attackers.
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct u64x8([u64; 8]);
+
+/// Eight-lane mask returned by `u64x8::nonzero`. Bit `n` corresponds to lane `n`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Mask64x8(u8);
+
+impl Mask64x8 {
+    #[inline]
+    pub fn to_bitmask(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<[u64; 8]> for u64x8 {
+    #[inline]
+    fn from(value: [u64; 8]) -> Self {
+        Self(value)
+    }
+}
+
+impl u64x8 {
+    #[inline]
+    pub fn splat(value: u64) -> Self {
+        let mut out = [0u64; 8];
+        unsafe {
+            let lanes = vdupq_n_u64(value);
+            for offset in (0..8).step_by(2) {
+                vst1q_u64(out.as_mut_ptr().add(offset), lanes);
+            }
+        }
+        Self(out)
+    }
+
+    #[inline]
+    pub fn nonzero(self) -> Mask64x8 {
+        let mut bits = 0u8;
+        unsafe {
+            let zero = vdupq_n_u64(0);
+            for offset in (0..8).step_by(2) {
+                let lanes = vld1q_u64(self.0.as_ptr().add(offset));
+                let equal = vceqq_u64(lanes, zero);
+                let mut compared = [0u64; 2];
+                vst1q_u64(compared.as_mut_ptr(), equal);
+
+                if compared[0] == 0 {
+                    bits |= 1u8 << offset;
+                }
+                if compared[1] == 0 {
+                    bits |= 1u8 << (offset + 1);
+                }
+            }
+        }
+        Mask64x8(bits)
+    }
+}
+
+impl BitAnd for u64x8 {
+    type Output = Self;
+
+    #[inline]
+    fn bitand(self, rhs: Self) -> Self::Output {
+        let mut out = [0u64; 8];
+        unsafe {
+            for offset in (0..8).step_by(2) {
+                let lhs = vld1q_u64(self.0.as_ptr().add(offset));
+                let rhs = vld1q_u64(rhs.0.as_ptr().add(offset));
+                vst1q_u64(out.as_mut_ptr().add(offset), vandq_u64(lhs, rhs));
+            }
+        }
+        Self(out)
+    }
+}
+
+impl BitAndAssign for u64x8 {
+    #[inline]
+    fn bitand_assign(&mut self, rhs: Self) {
+        *self = *self & rhs;
+    }
+}
+
+/*----------------------------------------------------------------*/
+
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct u8x64([u8; 64]);
