@@ -1,96 +1,158 @@
-name: Build Cherry Engine (Android ARM64)
+name: Build Cherry for Android ARM64
 
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'build.rs'
+      - '.cargo/config.toml'
+      - 'cherry-core/**'
+      - 'src/**'
+      - 'scripts/download_net.py'
+      - '.github/workflows/android.yml'
+      - 'rust-toolchain'
+
+permissions:
+  contents: read
 
 jobs:
-  build-android:
-    name: Build Android ARM64 (NEON)
-    runs-on: ubuntu-latest
-
+  build:
+    name: Android ARM64 NEON Dotprod (embedded kiwi-v3)
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
+      - name: Checkout Cherry
         uses: actions/checkout@v4
 
-      # The repo pins nightly-2026-01-04 via rust-toolchain; the action
-      # respects that file, but we set it explicitly for clarity.
-      - name: Install Rust Nightly
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-01-04
-          targets: aarch64-linux-android
-          components: rust-src, llvm-tools
-
-      - name: Install Android NDK r27
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r27
-          add-to-path: false
-
-      - name: Download NNUE Network
-        run: python3 ./scripts/download_net.py
-
-      - name: Build (capture full log)
-        id: build
-        continue-on-error: true
-        env:
-          NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
-          TOOLCHAIN: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin
-          API: 24
-          TARGET: aarch64-linux-android
+      - name: Install pinned Rust toolchain and Android target
+        shell: bash
         run: |
-          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android${API}-clang"
-          export CXX_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android${API}-clang++"
-          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+          set -euo pipefail
+          rustup toolchain install nightly-2026-01-04 --profile minimal
+          rustup target add aarch64-linux-android --toolchain nightly-2026-01-04
+          rustc +nightly-2026-01-04 --version
 
-          # Enable NEON, fp16, and dot-product. NEON is baseline on aarch64,
-          # but +dotprod and +fp16 give meaningful NNUE speedups on any
-          # device from ~2018 onward. Remove them for older SoCs.
-          #
-          # `tee log.txt` captures the full compiler output. `|| true` and
-          # `continue-on-error: true` ensure the job doesn't abort before
-          # we get a chance to upload the log artifact.
-          cargo rustc \
-            --release \
-            --target "$TARGET" \
-            -p cherry \
-            --config 'target.aarch64-linux-android.rustflags=["-Ctarget-feature=+neon,+fp16,+dotprod","-Ctarget-cpu=generic"]' \
-            -- --emit link=cherry-android 2>&1 | tee log.txt || true
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: log.txt
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Show error summary
-        if: always()
+      - name: Locate Android NDK
+        id: ndk
+        shell: bash
         run: |
-          if [ -f log.txt ]; then
-            echo "=== Total lines: $(wc -l < log.txt) ==="
-            echo "=== Error count: $(grep -c '^error' log.txt || echo 0) ==="
-            echo ""
-            echo "=== First 40 error lines ==="
-            grep -nE '^error(\[|:)|^  --> ' log.txt | head -40 || true
+          set -euo pipefail
+
+          NDK=""
+          if [[ -n "${ANDROID_NDK_LATEST_HOME:-}" && -d "$ANDROID_NDK_LATEST_HOME" ]]; then
+            NDK="$ANDROID_NDK_LATEST_HOME"
+          elif [[ -n "${ANDROID_NDK_HOME:-}" && -d "$ANDROID_NDK_HOME" ]]; then
+            NDK="$ANDROID_NDK_HOME"
+          else
+            SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+            if [[ -d "$SDK/ndk" ]]; then
+              NDK="$(find "$SDK/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+            fi
           fi
 
-      - name: Inspect binary
-        if: success()
-        run: file cherry-android
+          if [[ -z "$NDK" || ! -d "$NDK" ]]; then
+            echo "Android NDK not found on this runner" >&2
+            exit 1
+          fi
 
-      - name: Upload Android Executable
-        if: success()
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          LINKER="$TOOLCHAIN/aarch64-linux-android24-clang"
+          if [[ ! -x "$LINKER" ]]; then
+            echo "Android API 24 ARM64 linker not found: $LINKER" >&2
+            exit 1
+          fi
+
+          echo "ndk=$NDK" >> "$GITHUB_OUTPUT"
+          echo "toolchain=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
+          echo "Using Android NDK: $NDK"
+          "$LINKER" --version | head -n 1
+
+      - name: Download and verify embedded kiwi-v3 network
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/download_net.py
+          test -s networks/default.nnue
+          echo "83b0c14fa69abd7a6e473290abb40a0c5315bb1fa6976d3e618e7743f6219312  networks/default.nnue" | sha256sum --check
+          ls -lh networks/default.nnue
+
+      - name: Configure Android cross-compilation
+        shell: bash
+        env:
+          ANDROID_NDK: ${{ steps.ndk.outputs.ndk }}
+          ANDROID_TOOLCHAIN: ${{ steps.ndk.outputs.toolchain }}
+        run: |
+          set -euo pipefail
+          LINKER="$ANDROID_TOOLCHAIN/aarch64-linux-android24-clang"
+
+          {
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$LINKER"
+            echo "CC_aarch64_linux_android=$LINKER"
+            echo "CXX_aarch64_linux_android=$ANDROID_TOOLCHAIN/aarch64-linux-android24-clang++"
+            echo "AR_aarch64_linux_android=$ANDROID_TOOLCHAIN/llvm-ar"
+            echo "CFLAGS_aarch64_linux_android=-march=armv8.2-a+dotprod -mtune=cortex-a76"
+            echo "CXXFLAGS_aarch64_linux_android=-march=armv8.2-a+dotprod -mtune=cortex-a76"
+          } >> "$GITHUB_ENV"
+
+      - name: Compile Cherry ARM64 engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-01-04 build \
+            --release \
+            --package cherry \
+            --target aarch64-linux-android
+
+      - name: Compile ARM64 SIMD unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly-2026-01-04 test \
+            --release \
+            --package cherry-core \
+            --target aarch64-linux-android \
+            --no-run
+
+      - name: Verify ARM64 executable and embedded network
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BIN="target/aarch64-linux-android/release/cherry"
+          NET="networks/default.nnue"
+
+          if [[ ! -s "$BIN" ]]; then
+            echo "Cherry executable was not produced: $BIN" >&2
+            exit 1
+          fi
+
+          file "$BIN"
+          readelf -hW "$BIN" | grep -q 'AArch64' || {
+            echo "Output is not an AArch64 executable" >&2
+            exit 1
+          }
+
+          python3 - "$BIN" "$NET" <<'PY'
+          import pathlib
+          import sys
+
+          binary = pathlib.Path(sys.argv[1])
+          network = pathlib.Path(sys.argv[2])
+          binary_size = binary.stat().st_size
+          network_size = network.stat().st_size
+
+          print(f'Executable size: {binary_size:,} bytes')
+          print(f'NNUE network size: {network_size:,} bytes')
+
+          if binary_size <= network_size:
+              raise SystemExit('Executable is not larger than the embedded network; embedding check failed')
+
+          print('AArch64 executable and embedded-network size check passed.')
+          PY
+
+      - name: Upload Cherry engine
         uses: actions/upload-artifact@v4
         with:
-          name: cherry-android-arm64
-          path: cherry-android
+          name: Cherry-Android-ARM64-NEON-Dotprod-kiwi-v3
+          path: target/aarch64-linux-android/release/cherry
           if-no-files-found: error
