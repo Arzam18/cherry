@@ -6,6 +6,57 @@ use crate::*;
 
 pub const DEFAULT_OVERHEAD: u64 = 100;
 
+// Poll the hard deadline frequently enough that a slow mobile CPU cannot
+// overshoot it by a large amount. BatchedAtomicCounter exposes its pending
+// buffer through local(), so this does not depend on flush boundaries.
+const TIME_CHECK_INTERVAL_NODES: u64 = 128;
+const HARD_TIME_SOFT_MULTIPLIER: u64 = 4;
+const MAX_HARD_TIME_CLOCK_DIVISOR: u64 = 4;
+const SOFT_TARGET_MOVE_TIME_GRACE_MS: u64 = 250;
+
+#[inline]
+fn movetime_hard_budget(time: u64) -> u64 {
+    time.saturating_add((time / 4).min(SOFT_TARGET_MOVE_TIME_GRACE_MS))
+}
+
+/// Calculate the initial soft and hard budgets for a clock-controlled search.
+/// Cherry keeps its tuned, increment-aware allocation and later adjusts the
+/// soft target using move/score stability. The hard deadline is deliberately
+/// stricter: no more than four times the initial soft target and no more than
+/// 25% of the usable remaining clock. The four-times ratio follows the
+/// soft/hard separation used by Rodent V (75% soft, 3x allocation hard), while
+/// the 25% reserve follows Pea's conservative mobile-clock ceiling.
+#[inline]
+fn clock_budgets(time: u64, inc: u64, moves_to_go: Option<u16>) -> (u64, u64) {
+    let (soft_time, tuned_hard_time) = if let Some(moves_to_go) = moves_to_go.filter(|n| *n > 0) {
+        let moves_to_go = u64::from(moves_to_go);
+        let hard_time = ((time as f64 / (W::hard_time_div() as f64 / 4096.0)) as u64)
+            .saturating_add(inc)
+            .min(time);
+        let soft_time = (time / moves_to_go).saturating_add(inc).min(hard_time);
+        (soft_time, hard_time)
+    } else {
+        let hard_time = ((time as f64 / (W::hard_time_div() as f64 / 4096.0)) as u64)
+            .saturating_add(inc.saturating_mul(W::hard_time_inc()) / 4096)
+            .min(time);
+        let soft_time = ((time as f64 / (W::soft_time_div() as f64 / 4096.0)) as u64)
+            .saturating_add(inc.saturating_mul(W::soft_time_inc()) / 4096)
+            .min(hard_time);
+        (soft_time, hard_time)
+    };
+
+    // Do not spend the increment before it is actually received. In
+    // particular, a large increment with a low remaining clock must not turn
+    // the hard deadline into the entire current clock.
+    let safe_clock = time / MAX_HARD_TIME_CLOCK_DIVISOR;
+    let soft_time = soft_time.min(safe_clock);
+    let hard_cap = soft_time
+        .saturating_mul(HARD_TIME_SOFT_MULTIPLIER)
+        .min(safe_clock);
+    let hard_time = tuned_hard_time.min(hard_cap).min(time);
+    (soft_time.min(hard_time), hard_time)
+}
+
 #[derive(Debug, Clone)]
 pub enum SearchLimit {
     SearchMoves(MoveList),
@@ -121,27 +172,13 @@ impl TimeManager {
 
             if soft_target {
                 self.hard_time
-                    .store(time.saturating_mul(2).max(time + 2000), Ordering::Relaxed);
+                    .store(movetime_hard_budget(time), Ordering::Relaxed);
             } else {
                 self.hard_time.store(time, Ordering::Relaxed);
             }
-        } else if let Some(moves_to_go) = moves_to_go {
-            let (time, inc) = (time[stm].saturating_sub(overhead), inc[stm]);
-            let hard_time =
-                ((time as f64 / (W::hard_time_div() as f64 / 4096.0)) as u64 + inc).min(time);
-            let soft_time = (time / moves_to_go as u64 + inc).min(hard_time);
-
-            self.base_time.store(soft_time, Ordering::Relaxed);
-            self.soft_time.store(soft_time, Ordering::Relaxed);
-            self.hard_time.store(hard_time, Ordering::Relaxed);
         } else {
             let (time, inc) = (time[stm].saturating_sub(overhead), inc[stm]);
-            let hard_time = ((time as f64 / (W::hard_time_div() as f64 / 4096.0)) as u64
-                + inc * W::hard_time_inc() / 4096)
-                .min(time);
-            let soft_time = ((time as f64 / (W::soft_time_div() as f64 / 4096.0)) as u64
-                + inc * W::soft_time_inc() / 4096)
-                .min(hard_time);
+            let (soft_time, hard_time) = clock_budgets(time, inc, moves_to_go);
 
             self.base_time.store(soft_time, Ordering::Relaxed);
             self.soft_time.store(soft_time, Ordering::Relaxed);
@@ -162,7 +199,7 @@ impl TimeManager {
         move_nodes: u64,
         nodes: u64,
     ) {
-        if depth < 4 || self.no_manage.load(Ordering::Relaxed) {
+        if depth < 4 || nodes == 0 || self.no_manage.load(Ordering::Relaxed) {
             return;
         }
 
@@ -207,10 +244,10 @@ impl TimeManager {
     pub fn stop_search(&self, thread: &ThreadData) -> bool {
         self.should_stop()
             || thread.nodes.global() >= self.hard_nodes.load(Ordering::Relaxed)
-            || (thread.nodes.local().is_multiple_of(1024)
+            || (thread.nodes.local().is_multiple_of(TIME_CHECK_INTERVAL_NODES)
                 && thread.id == 0
                 && self.check_time.load(Ordering::Relaxed)
-                && self.elapsed().as_millis() as u64 > self.hard_time.load(Ordering::Relaxed))
+                && self.elapsed().as_millis() as u64 >= self.hard_time.load(Ordering::Relaxed))
     }
 
     #[inline]
@@ -219,7 +256,7 @@ impl TimeManager {
             || depth >= self.depth.load(Ordering::Relaxed)
             || nodes >= self.soft_nodes.load(Ordering::Relaxed)
             || (self.check_time.load(Ordering::Relaxed)
-                && self.elapsed().as_millis() as u64 > self.soft_time.load(Ordering::Relaxed))
+                && self.elapsed().as_millis() as u64 >= self.soft_time.load(Ordering::Relaxed))
     }
 
     #[inline]
@@ -235,5 +272,66 @@ impl TimeManager {
     #[inline]
     pub fn infinite(&self) -> bool {
         self.infinite.load(Ordering::Relaxed)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hard_budget_is_bounded_by_clock_reserve() {
+        let (soft, hard) = clock_budgets(60_000, 0, None);
+        assert!(soft > 0);
+        assert!(hard >= soft);
+        assert!(hard <= soft.saturating_mul(HARD_TIME_SOFT_MULTIPLIER));
+        assert!(hard <= 60_000 / MAX_HARD_TIME_CLOCK_DIVISOR);
+        assert!(hard <= 60_000);
+    }
+
+    #[test]
+    fn zero_moves_to_go_uses_incremental_clock_formula() {
+        assert_eq!(clock_budgets(30_000, 0, Some(0)), clock_budgets(30_000, 0, None));
+    }
+
+    #[test]
+    fn increment_budget_never_exceeds_remaining_time() {
+        let (soft, hard) = clock_budgets(5_000, 2_000, None);
+        assert!(soft <= 5_000);
+        assert!(hard <= 5_000);
+        assert!(soft <= hard);
+        assert!(hard <= 5_000 / MAX_HARD_TIME_CLOCK_DIVISOR);
+        assert!(hard <= soft.saturating_mul(HARD_TIME_SOFT_MULTIPLIER));
+    }
+
+    #[test]
+    fn movetime_soft_target_has_bounded_grace() {
+        assert_eq!(movetime_hard_budget(1_000), 1_250);
+        assert_eq!(movetime_hard_budget(100), 125);
+        assert_eq!(movetime_hard_budget(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn large_increment_cannot_consume_the_current_clock() {
+        let (soft, hard) = clock_budgets(1_000, 1_000, None);
+        assert!(soft <= 250);
+        assert!(hard <= 250);
+        assert!(soft <= hard);
+    }
+
+    #[test]
+    fn moves_to_go_budget_respects_both_hard_caps() {
+        let (soft, hard) = clock_budgets(60_000, 0, Some(25));
+        assert!(soft > 0);
+        assert!(soft <= 15_000);
+        assert!(hard >= soft);
+        assert!(hard <= soft.saturating_mul(HARD_TIME_SOFT_MULTIPLIER));
+        assert!(hard <= 15_000);
+    }
+
+    #[test]
+    fn no_usable_time_produces_zero_budget() {
+        assert_eq!(clock_budgets(0, 1_000, None), (0, 0));
     }
 }
