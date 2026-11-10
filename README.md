@@ -81,6 +81,8 @@ and for writing [an amazing blog series][attack-table-blog] about it.
 - Move Stability
 - Score Stability
 - Subtree Ratio
+- The soft target is reconsidered after each completed iterative-deepening depth.
+- The hard deadline is polled every 128 search nodes; for clock-based searches it is capped at four times the initial soft target and 25% of the usable remaining clock, reserving time for later moves.
 
 ### UCI Options
 
@@ -94,7 +96,7 @@ and for writing [an amazing blog series][attack-table-blog] about it.
 | ScoreNormalisation | Boolean | `true`    | `true` or `false` | When enabled, Cherry outputs a [normalised][normalisation] score.                                      |
 | SyzygyPath         | String  | `<empty>` | Any Path          | File path of Syzygy Tablebases (Can only be configured once during the runtime of the program)         |
 | MoveOverhead       | Integer | 100       | `0..=5000`        | Time in milliseconds used to compensate for the delay between engine and interface communication       |
-| SoftTarget         | Boolean | `false`   | `true` or `false` | When enabled, `go nodes <n>` and `go movetime <ms>` will only stop after a completed depth             |
+| SoftTarget         | Boolean | `false`   | `true` or `false` | Prefer stopping `go nodes` and `go movetime` after a completed depth; movetime keeps a hard safety grace capped at 25% or 250 ms |
 | UCI_ShowWDL        | Boolean | `true`    | `true` or `false` | When enabled, Cherry will also output WDL probabilities.                                               |
 | UCI_Chess960       | Boolean | `false`   | `true` or `false` | Whether to output UCI moves using standard notation (e1g1/e1c1) or Chess960 notation (e.g. e1h1, e1a1) |
 
